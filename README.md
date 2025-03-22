@@ -1,4 +1,6 @@
 ## **Practica 5: Buses de comunicación I (introducción y I2c)**
+El objetivo de esta práctica es comprender el funcionamiento de los buses de comunicación entre periféricos, en particular el protocolo I2C (Inter-Integrated Circuit). Este protocolo serie permite la conexión de múltiples dispositivos utilizando solo dos líneas: SDA (Serial Data Line), que transporta los datos, y SCL (Serial Clock Line), que proporciona la señal de sincronización. Su arquitectura maestro-esclavo permite que un dispositivo principal controle varios periféricos mediante direcciones únicas, facilitando la comunicación con sensores, pantallas y otros módulos electrónicos.
+
 ## **Ejercicio Practico 1 ESCÁNER I2C:**
 **Codigo main.cpp:**
 ```
@@ -50,15 +52,16 @@ void loop()
 
 
 ```
-la salida
 
+![WhatsApp Image 2025-03-22 at 14 20 37 (2)](https://github.com/user-attachments/assets/e191d201-d824-4221-b746-d856c0fc8b69)
+Para iniciar, en el primer ejercicio práctico se implementa un escáner I2C que permite detectar qué dispositivos están conectados al bus y muestra sus direcciones en el monitor serie. El código en C++ utiliza la librería Wire.h para inicializar el bus I2C en el ESP32 con los pines GPIO 21 (SDA) y GPIO 20 (SCL). Se realiza un bucle donde se recorren todas las direcciones posibles (del 1 al 126) e intenta comunicarse con cada una. Si la transmisión se completa sin errores, significa que un dispositivo está presente en esa dirección, por lo que se imprime su dirección en formato hexadecimal. Si no hay respuesta, se informa que no se encontró ningún dispositivo. 
+
+La salida esperada en el monitor serie es una lista de dispositivos detectados, mostrando su dirección en formato hexadecimal.
 ```
 Scanning...
 I2C device found at address 0x57 !
 done
 ```
-![WhatsApp Image 2025-03-22 at 14 20 37 (2)](https://github.com/user-attachments/assets/e191d201-d824-4221-b746-d856c0fc8b69)
-
 
 ## **Ejercicio Practico 2:**
 **Codigo main.cpp para que por la pantalla salga el mensaje del ejercicio practico 1:**
@@ -136,7 +139,7 @@ void loop() {
 }
 ```
 ![WhatsApp Image 2025-03-22 at 14 20 37](https://github.com/user-attachments/assets/5d35003f-8d13-4add-a36b-c785d50dee20)
-
+En el segundo ejercicio práctico se modifica el código del escáner I2C para que, en lugar de imprimir las direcciones en el monitor serie, estas se muestren en una pantalla OLED SSD1306 utilizando la librería Adafruit_SSD1306.h. Se inicializa la pantalla OLED en la dirección I2C 0x3C y se establece un texto de bienvenida indicando que se está realizando un escaneo. Luego, en el bucle principal, se recorren las direcciones I2C como en el primer ejercicio, pero en lugar de imprimir los resultados en el monitor serie, estos se dibujan en la pantalla OLED. Si no se encuentran dispositivos, se muestra el mensaje “No hay dispositivos I2C”. Este código permite visualizar directamente en la pantalla OLED la lista de dispositivos detectados.
 
 **Codigo main.cpp para que por la pantalla salga un mensaje personalizado:**
 ```
@@ -183,7 +186,7 @@ void loop() {
 }
 ```
 ![WhatsApp Image 2025-03-22 at 14 20 37 (1)](https://github.com/user-attachments/assets/89b3db85-b111-4d9f-8972-c5c95b7642db)
-
+Además, se incluye un tercer ejercicio donde se utiliza la pantalla OLED para mostrar un mensaje personalizado. Este código simplemente configura la pantalla OLED y muestra un texto fijo de bienvenida con un tamaño de fuente más grande. Este ejemplo demuestra cómo se puede utilizar la pantalla OLED para mostrar información sin necesidad de escanear dispositivos I2C.
 
 ## **Ejercicio de subida de nota ( muy valorado):**
 
@@ -240,4 +243,66 @@ void loop() {
 }
 
 ```
+En este ejercicio de subida de nota se integra un sensor MAX30102 para medir la frecuencia cardíaca y la saturación de oxígeno en sangre, mostrando los resultados en la pantalla OLED. Se usa la librería MAX30105.h para inicializar el sensor y obtener los valores de infrarrojo (IR), que permiten calcular la frecuencia cardíaca. El código muestra estos valores en la pantalla OLED, actualizándolos cada 500 ms.
+
+
 ### **Parte 2:**
+```
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "MAX30105.h"
+#include "spo2_algorithm.h"
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32
+#define SCREEN_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+MAX30105 particleSensor;
+
+uint32_t irBuffer[100], redBuffer[100];
+int32_t spo2, heartRate;
+int8_t validSPO2, validHeartRate;
+
+void setup() {
+  Serial.begin(115200);
+  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Iniciando...");
+  display.display();
+  
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+    Serial.println("Sensor MAX30102 no encontrado");
+    for (;;);
+  }
+
+  particleSensor.setup(60, 4, 2, 100, 411, 4096);
+}
+
+void loop() {
+  for (byte i = 0; i < 100; i++) {
+    while (!particleSensor.available()) particleSensor.check();
+    redBuffer[i] = particleSensor.getRed();
+    irBuffer[i] = particleSensor.getIR();
+    particleSensor.nextSample();
+  }
+
+  maxim_heart_rate_and_oxygen_saturation(irBuffer, 100, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("HR: ");
+  display.println(validHeartRate ? String(heartRate) + " BPM" : "N/A");
+  display.print("SpO2: ");
+  display.println(validSPO2 ? String(spo2) + " %" : "N/A");
+  display.display();
+  
+  delay(1000);
+}
+
+```
+Este codigo permite medir la frecuencia cardíaca y la saturación de oxígeno en sangre con el sensor MAX30102 y mostrar los valores en una pantalla OLED SSD1306. Utiliza comunicación I2C para conectar el ESP32 con ambos dispositivos y presenta los resultados en tiempo real. Primero, se inicializa la pantalla OLED y se muestra un mensaje de inicio. Luego, el sensor MAX30102 es configurado para capturar datos de luz roja e infrarroja, necesarios para calcular la frecuencia cardíaca y el SpO2. En el bucle principal, se leen 100 muestras del sensor, que luego se procesan con la función de cálculo para determinar los valores de HR (Heart Rate) y SpO2. Finalmente, los resultados se muestran en la pantalla OLED con un formato claro y actualizado cada segundo.
