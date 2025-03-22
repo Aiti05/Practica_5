@@ -57,6 +57,8 @@ Scanning...
 I2C device found at address 0x57 !
 done
 ```
+![WhatsApp Image 2025-03-22 at 14 20 37 (2)](https://github.com/user-attachments/assets/e191d201-d824-4221-b746-d856c0fc8b69)
+
 
 ## **Ejercicio Practico 2:**
 **Codigo main.cpp para que por la pantalla salga el mensaje del ejercicio practico 1:**
