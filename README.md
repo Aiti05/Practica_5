@@ -192,98 +192,176 @@ Además, se incluye un tercer ejercicio donde se utiliza la pantalla OLED para m
 
 ### **Parte 1:**
 ```
-#include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "MAX30105.h"
 #include "spo2_algorithm.h"
 
+// Definir los pines I2C personalizados para ESP32-S3
+#define SDA_PIN 21  
+#define SCL_PIN 22
+
+// Configuración OLED
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32
-#define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3C
-
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-MAX30105 particleSensor;
-
-void setup() {
-  Serial.begin(115200);
-  
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;);
-  }
-  
-  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
-    Serial.println("MAX30102 not found");
-    for(;;);
-  }
-
-  particleSensor.setup(60, 4, 2, 100, 411, 4096);
-  
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0,0);
-  display.println("Sensor MAX30102");
-  display.display();
-}
-
-void loop() {
-  int32_t irValue = particleSensor.getIR();
-
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.print("IR Value: ");
-  display.println(irValue);
-  display.display();
-
-  delay(500);
-}
-
-```
-En este ejercicio de subida de nota se integra un sensor MAX30102 para medir la frecuencia cardíaca y la saturación de oxígeno en sangre, mostrando los resultados en la pantalla OLED. Se usa la librería MAX30105.h para inicializar el sensor y obtener los valores de infrarrojo (IR), que permiten calcular la frecuencia cardíaca. El código muestra estos valores en la pantalla OLED, actualizándolos cada 500 ms.
-
-
-### **Parte 2:**
-```
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include "MAX30105.h"
-#include "spo2_algorithm.h"
-
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32
-#define SCREEN_ADDRESS 0x3C
-
+#define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-MAX30105 particleSensor;
 
+// Sensor MAX30105
+MAX30105 particleSensor;
 uint32_t irBuffer[100], redBuffer[100];
 int32_t spo2, heartRate;
 int8_t validSPO2, validHeartRate;
 
 void setup() {
   Serial.begin(115200);
-  display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
+  Wire.begin(SDA_PIN, SCL_PIN);  // Configurar I2C
+
+  // Iniciar pantalla OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println("Fallo en OLED SSD1306");
+    while (1);
+  }
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.println("Iniciando...");
   display.display();
-  
+
+  // Iniciar sensor MAX30105
   if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
-    Serial.println("Sensor MAX30102 no encontrado");
-    for (;;);
+    Serial.println("Sensor MAX30105 no encontrado");
+    while (1);
   }
 
-  particleSensor.setup(60, 4, 2, 100, 411, 4096);
+  // Configuración optimizada para MAX30105
+  particleSensor.setup(69, 4, 2, 100, 411, 4096);  // Configuración optimizada para HR + SpO2
 }
 
 void loop() {
+  // Leer 100 muestras del sensor
+  for (byte i = 0; i < 100; i++) {
+    while (!particleSensor.available()) particleSensor.check();
+    redBuffer[i] = particleSensor.getRed();
+    irBuffer[i] = particleSensor.getIR();
+    particleSensor.nextSample();
+  }
+
+  // Calcular SpO2 y HR
+  maxim_heart_rate_and_oxygen_saturation(irBuffer, 100, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
+
+  // Mostrar en pantalla OLED
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("HR: ");
+  display.println(validHeartRate ? String(heartRate) + " BPM" : "N/A");
+  display.print("SpO2: ");
+  display.println(validSPO2 ? String(spo2) + " %" : "N/A");
+  display.display();
+
+  Serial.print("HR: ");
+  Serial.print(validHeartRate ? String(heartRate) + " BPM" : "N/A");
+  Serial.print(" | SpO2: ");
+  Serial.println(validSPO2 ? String(spo2) + " %" : "N/A");
+
+  delay(1000);
+}
+
+
+```
+El código configura un ESP32-S3 para medir la frecuencia cardíaca y la saturación de oxígeno (SpO₂) utilizando un sensor MAX30105 y mostrar los valores en un display OLED SSD1306. Se inicializa la comunicación I2C con los pines SDA 21 y SCL 22, y se verifica que tanto el sensor como la pantalla funcionen correctamente. En cada iteración del loop(), se recogen 100 muestras de los valores de luz roja e infrarroja del sensor y se procesan con la función maxim_heart_rate_and_oxygen_saturation(), que calcula la frecuencia cardíaca y el SpO₂. Los datos se imprimen en el OLED y en el puerto serie, actualizándose cada segundo.
+
+
+### **Parte 2:**
+```
+#include <WiFi.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "MAX30105.h"
+#include "spo2_algorithm.h"
+
+// Configuración WiFi
+const char* ssid = "Nautilus";     
+const char* password = "20000Leguas"; 
+
+// Servidor Web
+WiFiServer server(80);
+
+// Configuración OLED
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Sensor MAX30105
+MAX30105 particleSensor;
+uint32_t irBuffer[100], redBuffer[100];
+int32_t spo2, heartRate;
+int8_t validSPO2, validHeartRate;
+
+// Pines I2C para ESP32-S3
+#define SDA_PIN 21 
+#define SCL_PIN 22 
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  // Conexión a WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando a WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi conectado!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+  server.begin();
+
+  // Iniciar OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println("Fallo en OLED");
+    while (1);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Iniciando...");
+  display.display();
+
+  // Iniciar sensor MAX30105
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+    Serial.println("Sensor MAX30105 no encontrado");
+    while (1);
+  }
+  particleSensor.setup(69, 4, 2, 100, 411, 4096);
+}
+
+void loop() {
+  // Manejar clientes web
+  WiFiClient client = server.available();
+  if (client) {
+    String request = client.readStringUntil('\r');
+    client.flush();
+
+    // Enviar datos al cliente
+    String response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    response += "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='1'>";
+    response += "<style>body{font-family:Arial;text-align:center;} .data{font-size:2em;color:blue;}</style>";
+    response += "</head><body>";
+    response += "<h2>Monitor de Frecuencia Cardiaca y SpO2</h2>";
+    response += "<p>Frecuencia Cardiaca: <span class='data'>" + String(validHeartRate ? String(heartRate) + " BPM" : "N/A") + "</span></p>";
+    response += "<p>SpO2: <span class='data'>" + String(validSPO2 ? String(spo2) + " %" : "N/A") + "</span></p>";
+    response += "</body></html>";
+
+    client.print(response);
+    client.stop();
+  }
+
+  // Leer datos del sensor
   for (byte i = 0; i < 100; i++) {
     while (!particleSensor.available()) particleSensor.check();
     redBuffer[i] = particleSensor.getRed();
@@ -293,6 +371,7 @@ void loop() {
 
   maxim_heart_rate_and_oxygen_saturation(irBuffer, 100, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
 
+  // Mostrar en OLED
   display.clearDisplay();
   display.setCursor(0, 0);
   display.print("HR: ");
@@ -300,9 +379,27 @@ void loop() {
   display.print("SpO2: ");
   display.println(validSPO2 ? String(spo2) + " %" : "N/A");
   display.display();
-  
+
+  // Mostrar en Monitor Serie
+  Serial.print("HR: ");
+  Serial.print(validHeartRate ? String(heartRate) + " BPM" : "N/A");
+  Serial.print(" | SpO2: ");
+  Serial.println(validSPO2 ? String(spo2) + " %" : "N/A");
+
   delay(1000);
 }
 
+
 ```
-Este codigo permite medir la frecuencia cardíaca y la saturación de oxígeno en sangre con el sensor MAX30102 y mostrar los valores en una pantalla OLED SSD1306. Utiliza comunicación I2C para conectar el ESP32 con ambos dispositivos y presenta los resultados en tiempo real. Primero, se inicializa la pantalla OLED y se muestra un mensaje de inicio. Luego, el sensor MAX30102 es configurado para capturar datos de luz roja e infrarroja, necesarios para calcular la frecuencia cardíaca y el SpO2. En el bucle principal, se leen 100 muestras del sensor, que luego se procesan con la función de cálculo para determinar los valores de HR (Heart Rate) y SpO2. Finalmente, los resultados se muestran en la pantalla OLED con un formato claro y actualizado cada segundo.
+Se mantiene la funcionalidad del sensor y la pantalla OLED, pero se añade conectividad WiFi para permitir el acceso remoto a los datos. El ESP32 se conecta a una red WiFi definida por un SSID y contraseña y crea un servidor web en el puerto 80. En cada ciclo del loop(), se gestionan las solicitudes de clientes HTTP, generando una página web con HTML y CSS que muestra los valores en tiempo real y se actualiza automáticamente cada segundo. Así, esta parte permite monitorear la frecuencia cardíaca y el SpO₂ tanto en la pantalla OLED como desde cualquier dispositivo en la misma red.
+
+
+
+
+
+
+
+
+
+
+
